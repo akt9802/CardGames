@@ -26,40 +26,52 @@ export function Seats({
   seats,
   youSeat,
   turnSeat,
+  turnLabel = "to play",
   wonSeats,
 }: {
   seats: Seat[];
   youSeat: number;
   turnSeat: number | null;
+  turnLabel?: string;
   wonSeats?: number[];
 }) {
   const won = new Set(wonSeats ?? []);
   return (
     <>
-      {seats.map((s) => (
-        <div
-          key={s.index}
-          className={[
-            "seat",
-            s.index === youSeat ? "you" : "",
-            turnSeat === s.index ? "turn" : "",
-            won.has(s.index) ? "won" : "",
-            s.team === "A" ? "teamA" : s.team === "B" ? "teamB" : "",
-          ].join(" ")}
-          style={seatStyle(s.index, seats.length, youSeat)}
-        >
-          <div className="bubble">{s.name.slice(0, 1)}</div>
-          <div className="nameplate">
-            <div className="who">
-              {s.index === youSeat ? "You" : s.name}
-              {s.isBot ? " · cpu" : ""}
-            </div>
-            <div className="meta">
-              {s.team ? `Team ${s.team}` : won.has(s.index) ? "took the trick" : `Seat ${s.index + 1}`}
+      {seats.map((s) => {
+        const isTurn = turnSeat === s.index;
+        return (
+          <div
+            key={s.index}
+            className={[
+              "seat",
+              s.index === youSeat ? "you" : "",
+              isTurn ? "turn" : "",
+              won.has(s.index) ? "won" : "",
+              s.team === "A" ? "teamA" : s.team === "B" ? "teamB" : "",
+            ].join(" ")}
+            style={seatStyle(s.index, seats.length, youSeat)}
+          >
+            <div className="bubble">{s.name.slice(0, 1)}</div>
+            {isTurn ? <div className="turn-tag">{s.index === youSeat ? "your turn" : "turn"}</div> : null}
+            <div className="nameplate">
+              <div className="who">
+                {s.index === youSeat ? "You" : s.name}
+                {s.isBot ? " · cpu" : ""}
+              </div>
+              <div className="meta">
+                {isTurn
+                  ? turnLabel
+                  : s.team
+                    ? `Team ${s.team}`
+                    : won.has(s.index)
+                      ? "took the trick"
+                      : `Seat ${s.index + 1}`}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </>
   );
 }

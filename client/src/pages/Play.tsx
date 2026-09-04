@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { RANKS, SUIT_NAME, type Rank } from "@shared/cards.ts";
 import { legalCallBreak, legalMendi } from "@shared/legal.ts";
-import { GAME_META, type CaboState, type ClientAction, type RoomPublic } from "@shared/types.ts";
+import { GAME_META, type CaboState, type ClientAction, type GameState, type RoomPublic } from "@shared/types.ts";
 import { CaboBoard, MiniGrid, caboHint } from "../components/CaboBoard.tsx";
 import { ChatPanel } from "../components/ChatPanel.tsx";
 import { PlayingCard } from "../components/PlayingCard.tsx";
@@ -70,14 +70,8 @@ export function Play() {
 
   const you = room.youSeat;
   const holding = (game.game === "callBreak" || game.game === "mendi") && game.phase === "holding";
-  const turn =
-    holding ||
-    (game.game === "bluff" && game.phase === "challenge") ||
-    (game.game === "cabo" && (game.phase === "showing" || game.phase === "peek"))
-      ? null
-      : "currentSeat" in game
-        ? game.currentSeat
-        : null;
+  const turn = whoseTurn(game);
+  const turnLabel = turnVerb(game);
   const wonSeats = (() => {
     if ((game.game === "callBreak" || game.game === "mendi") && holding && game.lastTrickWinner !== null) {
       return [game.lastTrickWinner];
@@ -93,7 +87,7 @@ export function Play() {
       }
       return [best];
     }
-    if (game.game === "cabo" && game.lastActor !== null && (game.phase === "showing" || game.phase === "turn")) {
+    if (game.game === "cabo" && game.lastActor !== null && game.phase === "showing") {
       return [game.lastActor];
     }
     return [];
@@ -152,7 +146,7 @@ export function Play() {
         <div className="felt" />
         <div className="wood-rim" />
         <div className="mandala" />
-        <Seats seats={room.seats} youSeat={you} turnSeat={turn} wonSeats={wonSeats} />
+        <Seats seats={room.seats} youSeat={you} turnSeat={turn} turnLabel={turnLabel} wonSeats={wonSeats} />
         {game.game === "cabo" ? (
           <CaboBoard state={game} seats={room.seats} youSeat={you} onSlot={caboSlot} />
         ) : null}
@@ -163,6 +157,8 @@ export function Play() {
           <div className="trick-banner">{room.seats[wonSeat]?.name} takes the trick</div>
         ) : game.game === "mendi" && game.phase === "handEnd" && game.lastResult ? (
           <div className="trick-banner">{game.lastResult}</div>
+        ) : turn !== null && game.phase !== "over" ? (
+          <div className="turn-banner">{turn === you ? "Your turn" : `${room.seats[turn]?.name} ${turnLabel}`}</div>
         ) : null}
         {err ? <div className="toast">{err}</div> : null}
         {overBanner(room)}
@@ -354,13 +350,19 @@ function statusLine(room: RoomPublic) {
   }
   if (g.game === "callBreak") {
     const trump = g.trump ? SUIT_NAME[g.trump] : g.trumpMode === "cut" ? "waiting for a cut" : "—";
-    return `Deal ${g.round}/${g.totalRounds} · trick ${g.trickNumber}/${g.totalTricks} · ${trump}`;
+    const who = room.seats[g.currentSeat]?.name;
+    const turn =
+      g.phase === "calling" ? `${who} to call` : g.phase === "trick" ? `${who} to play` : g.phase === "holding" ? `${who} took it` : "";
+    return `Deal ${g.round}/${g.totalRounds} · trick ${g.trickNumber}/${g.totalTricks} · ${trump}${turn ? ` · ${turn}` : ""}`;
   }
   if (g.game === "cabo") {
-    return g.phase === "peek" ? "Memorize your bottom two" : `${room.seats[g.currentSeat]?.name} · ${g.phase}`;
+    return g.phase === "peek" ? "Memorize your bottom two" : `${room.seats[g.currentSeat]?.name} to play`;
   }
   const trump = g.trumpRevealed && g.trump ? SUIT_NAME[g.trump] : g.trumpMode === "cut" ? "no cut yet" : "closed";
-  return `Hand ${g.handNumber} · tens A ${g.teamTens.A.length}–${g.teamTens.B.length} B · ${trump}`;
+  const who = room.seats[g.currentSeat]?.name;
+  const turn =
+    g.phase === "setTrump" ? `${who} sets trump` : g.phase === "trick" ? `${who} to play` : g.phase === "holding" ? `${who} took it` : "";
+  return `Hand ${g.handNumber} · tens A ${g.teamTens.A.length}–${g.teamTens.B.length} B · ${trump}${turn ? ` · ${turn}` : ""}`;
 }
 
 function center(room: RoomPublic, challengeLeft: number) {
@@ -460,6 +462,23 @@ function wrapWin(title: string, kicker: string, sub?: string) {
       </div>
     </div>
   );
+}
+
+function whoseTurn(game: GameState): number | null {
+  if (game.phase === "over") return null;
+  if (game.game === "bluff" && game.phase === "challenge") return null;
+  if (game.game === "cabo" && game.phase === "peek") return null;
+  if ((game.game === "callBreak" || game.game === "mendi") && game.phase === "showPower") return null;
+  if ("currentSeat" in game) return game.currentSeat;
+  return null;
+}
+
+function turnVerb(game: GameState): string {
+  if (game.game === "callBreak" && game.phase === "calling") return "to call";
+  if (game.game === "mendi" && game.phase === "setTrump") return "sets trump";
+  if (game.game === "bluff" && game.phase === "lead") return "leads";
+  if ((game.game === "callBreak" || game.game === "mendi") && game.phase === "holding") return "leads next";
+  return "to play";
 }
 
 function TrickFelt({ room, you, holding }: { room: RoomPublic; you: number; holding: boolean }) {
