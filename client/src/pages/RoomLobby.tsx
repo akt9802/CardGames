@@ -6,6 +6,7 @@ import { BrandMark } from "../components/BrandMark.tsx";
 import { InviteInbox } from "../components/InviteInbox.tsx";
 import { RulesRail } from "../components/RulesRail.tsx";
 import { connect, emit, loadSession } from "../session.ts";
+import { instagramUrl } from "../instagram.ts";
 
 export function RoomLobby() {
   const { id } = useParams();
@@ -158,9 +159,14 @@ export function RoomLobby() {
                     </div>
                     <div className="nm">{s.name}</div>
                     {s.instagram ? (
-                      <div className="mono" style={{ fontSize: 11, color: "var(--mist)" }}>
+                      <a
+                        className="ig-out"
+                        href={instagramUrl(s.instagram)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
                         @{s.instagram}
-                      </div>
+                      </a>
                     ) : null}
                   </div>
                 </div>

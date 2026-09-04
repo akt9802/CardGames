@@ -1,5 +1,6 @@
 import type { Seat } from "@shared/types.ts";
 import { Link } from "react-router-dom";
+import { instagramUrl } from "../instagram.ts";
 
 export function ringStyle(index: number, count: number, youSeat: number, radius: number, youY?: number) {
   const rel = (index - youSeat + count) % count;
@@ -70,7 +71,16 @@ export function Seats({
                   : s.name}
               {s.isBot ? " · cpu" : ""}
             </div>
-              {s.instagram && s.index !== youSeat ? <div className="ig">@{s.instagram}</div> : null}
+              {s.instagram && s.index !== youSeat ? (
+                <a
+                  className="ig ig-out"
+                  href={instagramUrl(s.instagram)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  @{s.instagram}
+                </a>
+              ) : null}
               <div className="meta">
                 {isTurn
                   ? turnLabel

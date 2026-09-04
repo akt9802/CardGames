@@ -9,6 +9,7 @@ import {
   unsubscribeFromPushNotifications,
 } from "../push.ts";
 import { askShowInstall, isStandalone, needsHomeScreenForPush } from "../pwa.ts";
+import { instagramUrl } from "../instagram.ts";
 import { apiJson, loadSession, logout, patchSession } from "../session.ts";
 import type { UserMe } from "@shared/types.ts";
 
@@ -197,6 +198,13 @@ export function Profile() {
                 placeholder="handle"
               />
             </div>
+            {instagram.trim() ? (
+              <p style={{ margin: "8px 0 0" }}>
+                <a className="ig-out" href={instagramUrl(instagram)} target="_blank" rel="noopener noreferrer">
+                  {instagramUrl(instagram)}
+                </a>
+              </p>
+            ) : null}
           </div>
           {me?.email ? (
             <p className="mono" style={{ color: "var(--mist)", fontSize: 12 }}>

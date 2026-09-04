@@ -4,6 +4,7 @@ import type { UserPublic } from "@shared/types.ts";
 import { BrandMark } from "../components/BrandMark.tsx";
 import { InviteInbox } from "../components/InviteInbox.tsx";
 import { apiJson, connect, emit, loadSession, logout } from "../session.ts";
+import { instagramUrl } from "../instagram.ts";
 
 type Person = UserPublic & { online: boolean; self: boolean };
 
@@ -186,19 +187,30 @@ export function People() {
                 <label>
                   <input type="checkbox" checked={picked.has(p.id)} onChange={() => toggle(p.id)} />
                 </label>
-                <Link className="person-id quiet-link" to={tableId ? `/people/${p.id}?table=${tableId}` : `/people/${p.id}`}>
-                  <span className="mini-portrait">
-                    {p.photoUrl ? <img src={p.photoUrl} alt="" /> : p.displayName.slice(0, 1)}
-                  </span>
-                  <div>
-                    <strong>{p.displayName}</strong>
-                    <div className="mono" style={{ fontSize: 12, color: "var(--mist)" }}>
-                      @{p.username}
-                      {p.instagram ? ` · @${p.instagram}` : ""}
-                      {p.online ? " · in the hall" : ""}
+                <div className="person-id">
+                  <Link className="person-id-main quiet-link" to={tableId ? `/people/${p.id}?table=${tableId}` : `/people/${p.id}`}>
+                    <span className="mini-portrait">
+                      {p.photoUrl ? <img src={p.photoUrl} alt="" /> : p.displayName.slice(0, 1)}
+                    </span>
+                    <div>
+                      <strong>{p.displayName}</strong>
+                      <div className="mono" style={{ fontSize: 12, color: "var(--mist)" }}>
+                        @{p.username}
+                        {p.online ? " · in the hall" : ""}
+                      </div>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                  {p.instagram ? (
+                    <a
+                      className="ig-out"
+                      href={instagramUrl(p.instagram)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      @{p.instagram}
+                    </a>
+                  ) : null}
+                </div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <Link className="btn" to={tableId ? `/people/${p.id}?table=${tableId}` : `/people/${p.id}`}>

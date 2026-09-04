@@ -239,6 +239,14 @@ h1, h2, h3, .display {
   text-decoration: none;
 }
 .quiet-link:hover { color: var(--brass-2); }
+.ig-out {
+  color: var(--brass-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.ig-out:hover { color: var(--brass); }
 
 .lobby {
   max-width: 1200px;
@@ -446,7 +454,7 @@ h1, h2, h3, .display {
   font-size: 13px;
   font-weight: 600;
 }
-.seat .ig { font-size: 11px; color: var(--mist); font-family: var(--mono); }
+.seat .ig { font-size: 11px; color: var(--mist); font-family: var(--mono); pointer-events: auto; }
 .seat .bubble {
   margin: 0 auto 8px;
   width: 48px;
@@ -845,6 +853,12 @@ h1, h2, h3, .display {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+}
+.person-id-main {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 .profile-wrap {
   max-width: 560px;
@@ -939,11 +953,19 @@ h1, h2, h3, .display {
 .rotate-gate h2 { font-size: clamp(28px, 8vw, 44px); margin-bottom: 8px; }
 .rotate-gate p { color: var(--mist); max-width: 28ch; margin: 0 auto; }
 
-.play-shell.compact {
+.play-shell.compact,
+.play-shell.compact.chat-collapsed,
+.play-shell.compact.rules-collapsed,
+.play-shell.compact.chat-collapsed.rules-collapsed {
   grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
   grid-template-areas:
     "bar"
     "table";
+}
+.play-shell.compact .chat,
+.play-shell.compact .rules {
+  grid-area: bar;
 }
 .play-shell.compact .table-wrap {
   margin-left: var(--safe-l);

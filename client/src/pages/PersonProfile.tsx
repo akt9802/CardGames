@@ -4,6 +4,7 @@ import type { UserPublic } from "@shared/types.ts";
 import { BrandMark } from "../components/BrandMark.tsx";
 import { InviteInbox } from "../components/InviteInbox.tsx";
 import { apiJson, connect, emit, loadSession, logout } from "../session.ts";
+import { instagramUrl } from "../instagram.ts";
 
 type Person = UserPublic & { online: boolean; self: boolean };
 
@@ -66,7 +67,7 @@ export function PersonProfile() {
     }
   }
 
-  const ig = person?.instagram ? `https://instagram.com/${person.instagram}` : "";
+  const ig = person?.instagram ? instagramUrl(person.instagram) : "";
 
   return (
     <>
@@ -109,8 +110,8 @@ export function PersonProfile() {
               {person.online ? " · in the hall" : ""}
             </p>
             {ig ? (
-              <a className="quiet-link" href={ig} target="_blank" rel="noreferrer">
-                Instagram @{person.instagram}
+              <a className="ig-out" href={ig} target="_blank" rel="noopener noreferrer">
+                @{person.instagram}
               </a>
             ) : (
               <p style={{ color: "var(--mist)", fontSize: 14 }}>No Instagram on this chair.</p>
