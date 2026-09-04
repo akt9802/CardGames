@@ -1,1 +1,1 @@
-xyz
+This is repo regarding All the card games
