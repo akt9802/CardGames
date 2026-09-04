@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,7 +20,10 @@ export function readJson<T>(name: string, fallback: T): T {
 }
 
 export function writeJson(name: string, value: unknown) {
-  writeFileSync(dataPath(name), JSON.stringify(value, null, 2));
+  const file = dataPath(name);
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value, null, 2));
+  renameSync(tmp, file);
 }
 
 export function photosDir() {

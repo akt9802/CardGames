@@ -1,9 +1,21 @@
 import { nanoid } from "nanoid";
 import type { TableInvite, UserPublic } from "../shared/types.ts";
 import { getUser } from "./auth.ts";
+import { readJson, writeJson } from "./store.ts";
 
 const invites: TableInvite[] = [];
 const lastPing = new Map<string, number>();
+
+function persistInvites() {
+  writeJson("invites.json", invites.slice(0, 200));
+}
+
+export function persistInvitesNow() {
+  persistInvites();
+}
+
+const disk = readJson<TableInvite[]>("invites.json", []);
+if (Array.isArray(disk) && disk.length) invites.push(...disk.slice(0, 200));
 
 export function invitesFor(userId: string) {
   return invites.filter((i) => i.toId === userId).slice(0, 20);
@@ -37,17 +49,22 @@ export function createInvite(
   };
   invites.unshift(rec);
   while (invites.length > 200) invites.pop();
+  persistInvites();
   return rec;
 }
 
 export function dismissInvite(id: string, userId: string) {
   const i = invites.findIndex((x) => x.id === id && x.toId === userId);
-  if (i >= 0) invites.splice(i, 1);
-}
-
-export function dropInvitesForRoom(roomId: string) {
-  for (let i = invites.length - 1; i >= 0; i--) {
-    if (invites[i].roomId === roomId && invites[i].kind === "invite") invites.splice(i, 1);
+  if (i >= 0) {
+    invites.splice(i, 1);
+    persistInvites();
   }
 }
 
+export function dropInvitesForRoom(roomId: string) {
+  const before = invites.length;
+  for (let i = invites.length - 1; i >= 0; i--) {
+    if (invites[i].roomId === roomId && invites[i].kind === "invite") invites.splice(i, 1);
+  }
+  if (invites.length !== before) persistInvites();
+}

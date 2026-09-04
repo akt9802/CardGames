@@ -5,6 +5,7 @@ import { BrandMark } from "../components/BrandMark.tsx";
 import { InviteInbox } from "../components/InviteInbox.tsx";
 import { apiJson, connect, emit, loadSession, logout } from "../session.ts";
 import { instagramUrl } from "../instagram.ts";
+import { Missing } from "./Missing.tsx";
 
 type Person = UserPublic & { online: boolean; self: boolean };
 
@@ -16,6 +17,7 @@ export function PersonProfile() {
   const session = loadSession()!;
   const [person, setPerson] = useState<Person | null>(null);
   const [err, setErr] = useState("");
+  const [missing, setMissing] = useState("");
   const [ok, setOk] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -23,8 +25,15 @@ export function PersonProfile() {
     if (!id) return;
     connect(session.token);
     apiJson<{ user: Person }>(`/api/people/${id}`, undefined, session.token)
-      .then((d) => setPerson(d.user))
-      .catch((e) => setErr(e instanceof Error ? e.message : "Could not open that chair."));
+      .then((d) => {
+        setPerson(d.user);
+        setMissing("");
+      })
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : "Could not open that chair.";
+        if (msg === "No chair with that name.") setMissing(msg);
+        else setErr(msg);
+      });
   }, [id, session.token]);
 
   async function invite() {
@@ -68,6 +77,18 @@ export function PersonProfile() {
   }
 
   const ig = person?.instagram ? instagramUrl(person.instagram) : "";
+
+  if (missing) {
+    return (
+      <Missing
+        kicker="No chair"
+        title="That chair is empty"
+        detail="Nobody in this parlor sits under that name. The hall still has people at the tables."
+        home="/people"
+        homeLabel="Back to people"
+      />
+    );
+  }
 
   return (
     <>

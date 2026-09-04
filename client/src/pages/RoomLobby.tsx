@@ -7,6 +7,7 @@ import { InviteInbox } from "../components/InviteInbox.tsx";
 import { RulesRail } from "../components/RulesRail.tsx";
 import { connect, emit, loadSession } from "../session.ts";
 import { instagramUrl } from "../instagram.ts";
+import { Missing } from "./Missing.tsx";
 
 export function RoomLobby() {
   const { id } = useParams();
@@ -14,29 +15,45 @@ export function RoomLobby() {
   const session = loadSession()!;
   const [room, setRoom] = useState<RoomPublic | null>(null);
   const [err, setErr] = useState("");
+  const [missing, setMissing] = useState("");
 
   useEffect(() => {
     const s = connect(session.token);
-    s.emit("room:join", { id }, (res: { ok: boolean; error?: string; room?: RoomPublic }) => {
-      if (!res.ok || !res.room) setErr(res.error ?? "Could not join");
-      else setRoom(res.room);
-    });
+    const join = () => {
+      s.emit("room:join", { id }, (res: { ok: boolean; error?: string; room?: RoomPublic }) => {
+        if (!res.ok || !res.room) setMissing(res.error ?? "This table no longer exists.");
+        else {
+          setMissing("");
+          setRoom(res.room);
+        }
+      });
+    };
+    s.on("connect", join);
+    if (s.connected) join();
     const onState = (r: RoomPublic) => {
       setRoom(r);
+      setMissing("");
       if (r.phase === "playing" || r.phase === "finished") nav(`/play/${r.id}`, { replace: true });
     };
     s.on("room:state", onState);
     return () => {
+      s.off("connect", join);
       s.off("room:state", onState);
     };
   }, [id, session.token, nav]);
 
-  if (err) {
+  if (missing) {
+    const gone = missing === "This table no longer exists.";
     return (
-      <div className="room-hero">
-        <p>{err}</p>
-        <Link to="/lobby">Back to lobby</Link>
-      </div>
+      <Missing
+        kicker="No table"
+        title={gone ? "This table no longer exists" : missing}
+        detail={
+          gone
+            ? "That sitting is not on this parlor anymore. Open a new table, or join with a live code."
+            : "You can still go back to the hall and sit at another table."
+        }
+      />
     );
   }
   if (!room) return <div className="room-hero">Finding the table…</div>;

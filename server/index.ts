@@ -18,7 +18,7 @@ import {
   verifySignupOtp,
 } from "./access.ts";
 import { notifyInvite, notifySeatTaken, notifyTableDealt, notifyTurnIfAway } from "./notify.ts";
-import { createInvite, dismissInvite, invitesFor } from "./invites.ts";
+import { createInvite, dismissInvite, invitesFor, persistInvitesNow } from "./invites.ts";
 import { dropSubscription, pushConfigured, sendWebPush, upsertSubscription, vapidPublicKey } from "./push.ts";
 import { photosDir } from "./store.ts";
 import { botAction } from "./engine/bots.ts";
@@ -35,6 +35,8 @@ import {
   isOnline,
   joinRoom,
   leaveRoom,
+  listRooms,
+  persistParlorNow,
   publicRoom,
   pushLobby,
   returnToLobby,
@@ -407,11 +409,19 @@ app.get("/healthz", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    res.status(404).json({ error: "That door does not exist." });
+    return;
+  }
+  next();
+});
+
 const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 app.use("/photos", express.static(photosDir(), { maxAge: "7d" }));
 app.use(express.static(dist));
 app.get("*", (req, res, next) => {
-  if (req.path.startsWith("/api") || req.path.startsWith("/socket.io") || req.path.startsWith("/photos")) return next();
+  if (req.path.startsWith("/socket.io") || req.path.startsWith("/photos")) return next();
   res.sendFile(join(dist, "index.html"), (err) => {
     if (err) next();
   });
@@ -474,6 +484,7 @@ function schedule(room: Room) {
       const names = room.seats.map((s) => s.name);
       room.game = resolveBluffTimeout(room.game, room.seats.length, names);
       if (room.game.phase === "over") room.phase = "finished";
+      persistParlorNow();
       emitRoom(room);
       emitLobby();
       schedule(room);
@@ -584,8 +595,14 @@ io.on("connection", (socket) => {
 
   socket.on("room:join", (payload: { code?: string; id?: string }, cb?: (res: unknown) => void) => {
     try {
-      const room = payload.id ? getRoom(payload.id) : payload.code ? getRoomByCode(payload.code) : undefined;
-      if (!room) throw new Error("No table with that code.");
+      const byId = typeof payload.id === "string" && payload.id.trim();
+      const byCode = typeof payload.code === "string" && payload.code.trim();
+      const room = byId ? getRoom(byId) : byCode ? getRoomByCode(byCode) : undefined;
+      if (!room) {
+        if (byId) throw new Error("This table no longer exists.");
+        if (byCode) throw new Error("No table with that code.");
+        throw new Error("Need a table code or a link.");
+      }
       joinRoom(room, user);
       socket.join(`room:${room.id}`);
       emitRoom(room);
@@ -726,6 +743,23 @@ io.on("connection", (socket) => {
   });
 });
 
+function flushParlor() {
+  persistParlorNow();
+  persistInvitesNow();
+}
+
+process.on("SIGTERM", () => {
+  flushParlor();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  flushParlor();
+  process.exit(0);
+});
+
 httpServer.listen(PORT, () => {
   console.log(`Baithak table open on :${PORT}`);
+  for (const room of listRooms()) {
+    if (room.phase === "playing") schedule(room);
+  }
 });

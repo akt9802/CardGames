@@ -5,6 +5,7 @@ import { applyBluff, createBluff, hideBluff, resolveBluffTimeout } from "./engin
 import { applyCallBreak, createCallBreak, hideCallBreak } from "./engine/callBreak.ts";
 import { applyCabo, createCabo, hideCabo } from "./engine/cabo.ts";
 import { applyMendi, createMendi, hideMendi, teamOf } from "./engine/mendi.ts";
+import { readJson, writeJson } from "./store.ts";
 
 export interface Room {
   id: string;
@@ -22,6 +23,54 @@ export interface Room {
 const rooms = new Map<string, Room>();
 const lobbyChat: ChatMessage[] = [];
 const socketsByUser = new Map<string, Set<string>>();
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+type RoomSnap = Omit<Room, "botTimer" | "challengeTimer">;
+
+function snapshot(): { rooms: RoomSnap[]; lobbyChat: ChatMessage[] } {
+  return {
+    rooms: [...rooms.values()].map(({ botTimer: _b, challengeTimer: _c, ...rest }) => ({
+      ...rest,
+      seats: rest.seats.map((s) => ({ ...s, connected: s.isBot })),
+    })),
+    lobbyChat: lobbyChat.slice(-80),
+  };
+}
+
+export function persistParlorNow() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  writeJson("parlor.json", snapshot());
+}
+
+function persistSoon() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    writeJson("parlor.json", snapshot());
+  }, 150);
+}
+
+function loadParlor() {
+  const disk = readJson<{ rooms?: RoomSnap[]; lobbyChat?: ChatMessage[] }>("parlor.json", {});
+  for (const row of disk.rooms ?? []) {
+    rooms.set(row.id, {
+      ...row,
+      botTimer: null,
+      challengeTimer: null,
+      seats: row.seats.map((s) => ({ ...s, connected: Boolean(s.isBot) })),
+    });
+  }
+  if (disk.lobbyChat?.length) lobbyChat.push(...disk.lobbyChat.slice(-80));
+}
+
+loadParlor();
+
+export function listRooms() {
+  return [...rooms.values()];
+}
 
 export function getLobbyChat() {
   return lobbyChat.slice(-80);
@@ -38,6 +87,7 @@ export function pushLobby(from: UserPublic, text: string): ChatMessage {
   };
   lobbyChat.push(msg);
   if (lobbyChat.length > 200) lobbyChat.shift();
+  persistSoon();
   return msg;
 }
 
@@ -108,6 +158,7 @@ export function createRoom(host: UserPublic, config: Partial<RoomConfig> & { sea
     challengeTimer: null,
   };
   rooms.set(room.id, room);
+  persistParlorNow();
   return room;
 }
 
@@ -147,6 +198,7 @@ export function joinRoom(room: Room, user: UserPublic): number {
     existing.name = user.displayName;
     existing.photoUrl = user.photoUrl;
     existing.instagram = user.instagram;
+    persistSoon();
     return existing.index;
   }
   if (room.phase === "playing") throw new Error("This table is already in play.");
@@ -159,6 +211,7 @@ export function joinRoom(room: Room, user: UserPublic): number {
   empty.isBot = false;
   empty.ready = false;
   empty.connected = true;
+  persistSoon();
   return empty.index;
 }
 
@@ -167,6 +220,7 @@ export function leaveRoom(room: Room, userId: string) {
   if (!seat) return;
   if (room.phase === "playing") {
     seat.connected = false;
+    persistSoon();
     return;
   }
   seat.playerId = null;
@@ -179,11 +233,15 @@ export function leaveRoom(room: Room, userId: string) {
     const next = room.seats.find((s) => s.playerId && !s.isBot);
     if (next?.playerId) room.hostId = next.playerId;
   }
+  persistSoon();
 }
 
 export function setReady(room: Room, userId: string, ready: boolean) {
   const seat = room.seats.find((s) => s.playerId === userId);
-  if (seat) seat.ready = ready;
+  if (seat) {
+    seat.ready = ready;
+    persistSoon();
+  }
 }
 
 export function clearBots(room: Room) {
@@ -220,6 +278,7 @@ export function configureTable(room: Room, patch: Partial<RoomConfig>) {
   if (patch.callBreakRounds !== undefined) room.config.callBreakRounds = patch.callBreakRounds;
   if (patch.mendiHandsToWin !== undefined) room.config.mendiHandsToWin = patch.mendiHandsToWin;
   paintTeams(room);
+  persistSoon();
 }
 
 export function resizeSeats(room: Room, n: number) {
@@ -244,6 +303,7 @@ export function returnToLobby(room: Room) {
   for (const seat of room.seats) {
     if (seat.playerId && !seat.isBot) seat.ready = false;
   }
+  persistSoon();
 }
 
 export function fillBots(room: Room) {
@@ -256,6 +316,7 @@ export function fillBots(room: Room) {
       seat.connected = true;
     }
   }
+  persistSoon();
 }
 
 export function canStart(room: Room) {
@@ -281,6 +342,7 @@ export function startGame(room: Room) {
   } else if (room.config.game === "cabo") room.game = createCabo(n);
   else room.game = createMendi(n, room.config.mendiHandsToWin ?? 5, room.config.trumpMode ?? "classic");
   room.phase = "playing";
+  persistParlorNow();
 }
 
 export function hideGame(game: GameState, viewerSeat: number | null): GameState {
@@ -333,6 +395,7 @@ export function roomChat(room: Room, from: UserPublic, text: string, team?: bool
   if (team && !seat?.team) throw new Error("No team chat at this table.");
   room.chat.push(msg);
   if (room.chat.length > 250) room.chat.shift();
+  persistSoon();
   return msg;
 }
 
@@ -346,27 +409,39 @@ export function apply(room: Room, userId: string, action: ClientAction): { error
     const res = applyBluff(room.game, action, seat.index, n, names);
     if (res.error) return { error: res.error };
     room.game = res.state;
-    if (res.state.phase === "over") room.phase = "finished";
+    if (res.state.phase === "over") {
+      room.phase = "finished";
+      persistParlorNow();
+    } else persistSoon();
     return {};
   }
   if (room.game.game === "callBreak") {
     const res = applyCallBreak(room.game, action, seat.index, n, names);
     if (res.error) return { error: res.error };
     room.game = res.state;
-    if (res.state.phase === "over") room.phase = "finished";
+    if (res.state.phase === "over") {
+      room.phase = "finished";
+      persistParlorNow();
+    } else persistSoon();
     return {};
   }
   if (room.game.game === "cabo") {
     const res = applyCabo(room.game, action, seat.index, n, names);
     if (res.error) return { error: res.error };
     room.game = res.state;
-    if (res.state.phase === "over") room.phase = "finished";
+    if (res.state.phase === "over") {
+      room.phase = "finished";
+      persistParlorNow();
+    } else persistSoon();
     return {};
   }
   const res = applyMendi(room.game, action, seat.index, n, names);
   if (res.error) return { error: res.error };
   room.game = res.state;
-  if (res.state.phase === "over") room.phase = "finished";
+  if (res.state.phase === "over") {
+    room.phase = "finished";
+    persistParlorNow();
+  } else persistSoon();
   return {};
 }
 

@@ -89,9 +89,9 @@ async function refreshAccess(): Promise<Session | null> {
   return next;
 }
 
-export function ensureFreshSession(): Promise<Session | null> {
+export function ensureFreshSession(force = false): Promise<Session | null> {
   const s = loadSession();
-  if (accessFresh(s)) return Promise.resolve(s);
+  if (!force && accessFresh(s)) return Promise.resolve(s);
   if (!s?.refreshToken) return Promise.resolve(s?.token ? s : null);
   if (!refreshWait) {
     refreshWait = refreshAccess().finally(() => {
@@ -190,7 +190,7 @@ export function connect(token: string) {
   currentToken = token;
   socket = io({ auth: { token } });
   socket.on("connect_error", () => {
-    void ensureFreshSession().then((s) => {
+    void ensureFreshSession(true).then((s) => {
       if (s && s.token !== currentToken) connect(s.token);
     });
   });

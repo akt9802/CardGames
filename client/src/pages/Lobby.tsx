@@ -61,8 +61,9 @@ export function Lobby() {
 
   async function join() {
     setErr("");
+    if (!code.trim()) return setErr("Enter a table code.");
     const res = await emit<{ ok: boolean; error?: string; room?: { id: string } }>("room:join", { code });
-    if (!res.ok || !res.room) return setErr(res.error ?? "No table");
+    if (!res.ok || !res.room) return setErr(res.error ?? "No table with that code.");
     nav(`/table/${res.room.id}`);
   }
 

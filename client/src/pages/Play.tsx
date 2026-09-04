@@ -10,8 +10,9 @@ import { PlayingCard } from "../components/PlayingCard.tsx";
 import { RulesRail } from "../components/RulesRail.tsx";
 import { Seats, trickStyle } from "../components/Seats.tsx";
 import { isPhone } from "../pwa.ts";
-import { connect, emit, loadSession } from "../session.ts";
+import { connect, emit, ensureSession, loadSession } from "../session.ts";
 import { useMediaQuery } from "../useMediaQuery.ts";
+import { Missing } from "./Missing.tsx";
 
 export function Play() {
   const { id } = useParams();
@@ -22,6 +23,7 @@ export function Play() {
   const [rank, setRank] = useState<Rank>("A");
   const [call, setCall] = useState(2);
   const [err, setErr] = useState("");
+  const [missing, setMissing] = useState("");
   const [now, setNow] = useState(Date.now());
   const [chatOpen, setChatOpen] = useState(true);
   const [rulesOpen, setRulesOpen] = useState(true);
@@ -42,10 +44,25 @@ export function Play() {
   }, []);
 
   useEffect(() => {
+    let live = true;
     const s = connect(session.token);
-    s.emit("room:join", { id }, (res: { ok: boolean; error?: string; room?: RoomPublic }) => {
-      if (res.ok && res.room) setRoom(res.room);
-    });
+    const join = () => {
+      s.emit("room:join", { id }, (res: { ok: boolean; error?: string; room?: RoomPublic }) => {
+        if (!live) return;
+        if (!res.ok || !res.room) {
+          setMissing(res.error ?? "This table no longer exists.");
+          return;
+        }
+        setMissing("");
+        if (res.room.phase === "lobby") {
+          nav(`/table/${res.room.id}`, { replace: true });
+          return;
+        }
+        setRoom(res.room);
+      });
+    };
+    s.on("connect", join);
+    if (s.connected) join();
     const onState = (r: RoomPublic) => {
       if (r.phase === "lobby") {
         nav(`/table/${r.id}`, { replace: true });
@@ -54,10 +71,14 @@ export function Play() {
       setRoom(r);
       setSelected([]);
       setErr("");
+      setMissing("");
     };
     s.on("room:state", onState);
     s.on("room:left", () => nav("/lobby"));
+    void ensureSession();
     return () => {
+      live = false;
+      s.off("connect", join);
       s.off("room:state", onState);
     };
   }, [id, session.token, nav]);
@@ -76,6 +97,20 @@ export function Play() {
     if (game.game === "callBreak") return new Set(legalCallBreak(game, youSeat).map((c) => c.id));
     return new Set(legalMendi(game, youSeat).map((c) => c.id));
   }, [game, youSeat, hand]);
+
+  if (missing) {
+    return (
+      <Missing
+        kicker="No sitting"
+        title={missing === "This table no longer exists." ? "This table no longer exists" : missing}
+        detail={
+          missing === "This table no longer exists."
+            ? "That sitting ended, or the code was never on this parlor. Open a new table from the hall."
+            : "You can still go back to the hall and sit at another table."
+        }
+      />
+    );
+  }
 
   if (!room || !game || room.youSeat === null) {
     return <div className="room-hero">Dealing…</div>;

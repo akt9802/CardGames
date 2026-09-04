@@ -15,6 +15,7 @@ import { Profile } from "./pages/Profile.tsx";
 import { RequestAccess } from "./pages/RequestAccess.tsx";
 import { RoomLobby } from "./pages/RoomLobby.tsx";
 import { Signup } from "./pages/Signup.tsx";
+import { Missing } from "./pages/Missing.tsx";
 import { ParlorOnPhone } from "./components/ParlorOnPhone.tsx";
 
 function Guard({ children }: { children: ReactNode }) {
@@ -125,6 +126,7 @@ export default function App() {
             </Guard>
           }
         />
+        <Route path="*" element={<Missing />} />
       </Routes>
     </div>
   );

@@ -56,7 +56,10 @@ Express + Socket.IO  (server/index.ts, default :3001)
 | Push subscriptions | `server/data/push.json` | Yes |
 | VAPID keys (if auto-generated) | `server/data/vapid.json` | Yes |
 | Portraits | `server/data/photos/` | Yes |
-| Access tokens, rooms, chat, invites | In-memory | **No** (use the refresh token; it lives 30 days) |
+| Access tokens, live sockets | In-memory | **No** — the client refreshes the 15-minute access token after a restart |
+| Rooms, in-progress games, table chat | `server/data/parlor.json` | Yes |
+| Hall chat | `server/data/parlor.json` | Yes |
+| Invites and pings | `server/data/invites.json` | Yes |
 
 Shared types and legal-move helpers live in `shared/` and are imported by both client (`@shared`) and server.
 

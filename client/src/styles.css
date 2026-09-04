@@ -1175,3 +1175,21 @@ h1, h2, h3, .display {
   .mandala { animation: none; }
   .hand .pcard { transition: none; }
 }
+
+.missing-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: max(72px, calc(48px + var(--safe-t))) max(24px, var(--safe-r)) 80px max(24px, var(--safe-l));
+}
+.missing-page h1.display {
+  font-size: clamp(36px, 8vw, 64px);
+  line-height: 0.95;
+  margin-bottom: 16px;
+}
+.missing-page p {
+  color: var(--ivory-dim);
+  font-size: 18px;
+  line-height: 1.5;
+  max-width: 42ch;
+  margin: 0;
+}
