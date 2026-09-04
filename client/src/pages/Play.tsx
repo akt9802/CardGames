@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { RANKS, SUIT_NAME, type Rank } from "@shared/cards.ts";
 import { legalCallBreak, legalMendi } from "@shared/legal.ts";
 import { GAME_META, type CaboState, type ClientAction, type GameState, type RoomPublic } from "@shared/types.ts";
+import { BrandMark } from "../components/BrandMark.tsx";
 import { CaboBoard, MiniGrid, caboHint } from "../components/CaboBoard.tsx";
 import { ChatPanel } from "../components/ChatPanel.tsx";
 import { PlayingCard } from "../components/PlayingCard.tsx";
@@ -93,7 +94,7 @@ export function Play() {
     return [];
   })();
   const wonSeat = wonSeats[0] ?? null;
-  const meta = GAME_META[room.config.game];
+  const meta = GAME_META[room.config.game ?? game.game];
   const challengeLeft =
     game.game === "bluff" && game.phase === "challenge" && game.challengeUntil
       ? Math.max(0, Math.ceil((game.challengeUntil - now) / 1000))
@@ -116,11 +117,7 @@ export function Play() {
     <div className={`play-shell ${chatOpen ? "" : "chat-collapsed"} ${rulesOpen ? "" : "rules-collapsed"}`}>
       <header className="topbar">
         <Link className="mark" to="/lobby">
-          <span className="ring">♠</span>
-          <div>
-            <strong>{meta.title}</strong>
-            <span className="mono">{room.code}</span>
-          </div>
+          <BrandMark kicker={`${meta.title} · ${room.code}`} />
         </Link>
         <div className="status">{statusLine(room)}</div>
         <button className="btn ghost" type="button" onClick={() => navigator.clipboard.writeText(room.code)}>
@@ -161,7 +158,10 @@ export function Play() {
           <div className="turn-banner">{turn === you ? "Your turn" : `${room.seats[turn]?.name} ${turnLabel}`}</div>
         ) : null}
         {err ? <div className="toast">{err}</div> : null}
-        {overBanner(room)}
+        {overBanner(room, session.user.id, async () => {
+          const res = await emit<{ ok: boolean; error?: string }>("room:again", room.id);
+          if (!res.ok) setErr(res.error ?? "Could not reopen the table");
+        })}
 
         <div className={`hand-dock ${wonSeat === you ? "you-won" : ""}`}>
           {game.game === "bluff" && game.phase === "lead" && turn === you ? (
@@ -253,7 +253,7 @@ export function Play() {
         </div>
       </div>
 
-      <RulesRail game={room.config.game} collapsed={!rulesOpen} onToggle={() => setRulesOpen((v) => !v)} />
+      <RulesRail game={game.game} collapsed={!rulesOpen} onToggle={() => setRulesOpen((v) => !v)} />
     </div>
   );
 }
@@ -431,34 +431,44 @@ function center(room: RoomPublic, challengeLeft: number) {
   );
 }
 
-function overBanner(room: RoomPublic) {
+function overBanner(room: RoomPublic, userId: string, onAgain: () => void) {
   const g = room.game;
   if (!g) return null;
+  const host = room.hostId === userId;
   if (g.game === "bluff" && g.phase === "over" && g.winnerSeat !== null) {
-    return wrapWin(room.seats[g.winnerSeat]?.name ?? "", "The pile is empty for");
+    return wrapWin(room.seats[g.winnerSeat]?.name ?? "", "The pile is empty for", undefined, host, onAgain);
   }
   if (g.game === "callBreak" && g.phase === "over" && g.winnerSeat !== null) {
-    return wrapWin(room.seats[g.winnerSeat]?.name ?? "", "Highest score", `${g.scores[g.winnerSeat]} points`);
+    return wrapWin(room.seats[g.winnerSeat]?.name ?? "", "Highest score", `${g.scores[g.winnerSeat]} points`, host, onAgain);
   }
   if (g.game === "mendi" && g.phase === "over" && g.winnerTeam) {
-    return wrapWin(`Team ${g.winnerTeam}`, "The sitting belongs to", `${g.teamHands.A}–${g.teamHands.B}`);
+    return wrapWin(`Team ${g.winnerTeam}`, "The sitting belongs to", `${g.teamHands.A}–${g.teamHands.B}`, host, onAgain);
   }
   if (g.game === "cabo" && g.phase === "over" && g.winnerSeat !== null) {
-    return wrapWin(room.seats[g.winnerSeat]?.name ?? "", "Lowest pile", `${g.scores?.[g.winnerSeat] ?? 0} points`);
+    return wrapWin(room.seats[g.winnerSeat]?.name ?? "", "Lowest pile", `${g.scores?.[g.winnerSeat] ?? 0} points`, host, onAgain);
   }
   return null;
 }
 
-function wrapWin(title: string, kicker: string, sub?: string) {
+function wrapWin(title: string, kicker: string, sub: string | undefined, host: boolean, onAgain: () => void) {
   return (
     <div className="winner">
       <div>
         <div className="kicker">{kicker}</div>
         <h2>{title}</h2>
         {sub ? <p className="mono">{sub}</p> : null}
-        <Link className="btn solid" to="/lobby">
-          Back to the hall
-        </Link>
+        {host ? (
+          <button className="btn solid" type="button" onClick={onAgain}>
+            Another game at this table
+          </button>
+        ) : (
+          <p style={{ color: "var(--mist)" }}>The host will pick the next sitting at this table.</p>
+        )}
+        <p>
+          <Link className="btn" to="/lobby">
+            Back to the hall
+          </Link>
+        </p>
       </div>
     </div>
   );

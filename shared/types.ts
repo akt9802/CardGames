@@ -8,6 +8,13 @@ export interface UserPublic {
   id: string;
   username: string;
   displayName: string;
+  photoUrl?: string;
+  instagram?: string;
+}
+
+export interface UserMe extends UserPublic {
+  email: string;
+  phone: string;
 }
 
 export interface Seat {
@@ -18,6 +25,8 @@ export interface Seat {
   ready: boolean;
   connected: boolean;
   team?: TeamId;
+  photoUrl?: string;
+  instagram?: string;
 }
 
 export interface ChatMessage {
@@ -31,7 +40,7 @@ export interface ChatMessage {
 }
 
 export interface RoomConfig {
-  game: GameId;
+  game: GameId | null;
   seats: number;
   fillBots: boolean;
   mendiHandsToWin?: number;
@@ -163,6 +172,18 @@ export interface RoomPublic {
   chat: ChatMessage[];
   game: GameState | null;
   youSeat: number | null;
+}
+
+export interface TableInvite {
+  id: string;
+  kind: "invite" | "ping";
+  roomId: string | null;
+  roomCode: string | null;
+  fromId: string;
+  fromName: string;
+  fromPhoto?: string;
+  toId: string;
+  createdAt: number;
 }
 
 export type ClientAction =

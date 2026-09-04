@@ -1,32 +1,42 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { GAME_META } from "@shared/types.ts";
+import { BrandMark } from "../components/BrandMark.tsx";
 import { PlayingCard } from "../components/PlayingCard.tsx";
-import { loadSession } from "../session.ts";
+import { loadSession, logout } from "../session.ts";
 
 export function Landing() {
   const in_ = loadSession();
+  const nav = useNavigate();
   return (
     <>
       <header className="topbar">
         <a className="mark" href="/">
-          <span className="ring">♠</span>
-          <div>
-            <strong>Baithak</strong>
-            <span>late sitting, four games</span>
-          </div>
+          <BrandMark kicker="late sitting, four games" />
         </a>
         <div style={{ display: "flex", gap: 8 }}>
           {in_ ? (
-            <Link className="btn solid" to="/lobby">
-              Enter lobby
-            </Link>
+            <>
+              <Link className="btn solid" to="/lobby">
+                Enter lobby
+              </Link>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={async () => {
+                  await logout();
+                  nav("/");
+                }}
+              >
+                Sign out
+              </button>
+            </>
           ) : (
             <>
               <Link className="btn" to="/login">
                 Sign in
               </Link>
-              <Link className="btn solid" to="/register">
-                Take a seat
+              <Link className="btn solid" to="/request-access">
+                Request access
               </Link>
             </>
           )}
@@ -42,8 +52,8 @@ export function Landing() {
             with a five-letter code.
           </p>
           <div className="hero-actions">
-            <Link className="btn solid" to={in_ ? "/lobby" : "/register"}>
-              Sit down
+            <Link className="btn solid" to={in_ ? "/lobby" : "/request-access"}>
+              {in_ ? "Sit down" : "Request a chair"}
             </Link>
             <Link className="btn" to="/lobby">
               Join a room
@@ -68,7 +78,7 @@ export function Landing() {
         {(Object.keys(GAME_META) as Array<keyof typeof GAME_META>).map((id) => {
           const g = GAME_META[id];
           return (
-            <Link key={id} className="game-card" to={in_ ? "/lobby" : "/register"}>
+            <Link key={id} className="game-card" to={in_ ? "/lobby" : "/request-access"}>
               <div className="tag" style={{ color: g.accent }}>
                 {g.tag}
               </div>

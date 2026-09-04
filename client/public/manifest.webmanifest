@@ -1,0 +1,26 @@
+{
+  "id": "https://games.zakarias.in/",
+  "name": "Baithak",
+  "short_name": "Baithak",
+  "description": "Late sitting. Four tables. Bluff, Call Break, Mendi Coat, Cabo.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#071014",
+  "theme_color": "#0e3b34",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 import { nanoid } from "nanoid";
 import { BOT_NAMES, GAME_META, type ChatMessage, type ClientAction, type GameState, type RoomConfig, type RoomPhase, type RoomPublic, type Seat, type TeamId, type UserPublic } from "../shared/types.ts";
+import { getUser } from "./auth.ts";
 import { applyBluff, createBluff, hideBluff, resolveBluffTimeout } from "./engine/bluff.ts";
 import { applyCallBreak, createCallBreak, hideCallBreak } from "./engine/callBreak.ts";
 import { applyCabo, createCabo, hideCabo } from "./engine/cabo.ts";
 import { applyMendi, createMendi, hideMendi, teamOf } from "./engine/mendi.ts";
-import { botAction } from "./engine/bots.ts";
 
 export interface Room {
   id: string;
@@ -49,26 +49,57 @@ function code(): string {
   return s;
 }
 
-export function createRoom(host: UserPublic, config: RoomConfig): Room {
-  const meta = GAME_META[config.game];
-  if (!meta.seatOptions.includes(config.seats)) {
-    throw new Error(`This table seats ${meta.seatOptions.join(" or ")}.`);
+function emptySeat(index: number, team?: TeamId): Seat {
+  return {
+    index,
+    playerId: null,
+    name: "Empty",
+    isBot: false,
+    ready: false,
+    connected: false,
+    team,
+  };
+}
+
+function paintTeams(room: Room) {
+  const teams = room.config.game ? GAME_META[room.config.game].teams : false;
+  for (const seat of room.seats) {
+    seat.index = room.seats.indexOf(seat);
+    seat.team = teams ? (seat.index % 2 === 0 ? "A" : "B") : undefined;
   }
-  const teams = meta.teams;
-  const seats: Seat[] = Array.from({ length: config.seats }, (_, i) => ({
+}
+
+export function createRoom(host: UserPublic, config: Partial<RoomConfig> & { seats?: number }): Room {
+  const seatsCount = Number(config.seats ?? 8);
+  if (seatsCount < 2 || seatsCount > 8) throw new Error("A table seats 2–8.");
+  const game = config.game ?? null;
+  if (game && !GAME_META[game].seatOptions.includes(seatsCount)) {
+    throw new Error(`This table seats ${GAME_META[game].seatOptions.join(" or ")} for ${GAME_META[game].title}.`);
+  }
+  const teams = game ? GAME_META[game].teams : false;
+  const seats: Seat[] = Array.from({ length: seatsCount }, (_, i) => ({
     index: i,
     playerId: i === 0 ? host.id : null,
     name: i === 0 ? host.displayName : "Empty",
     isBot: false,
     ready: i === 0,
     connected: i === 0,
+    photoUrl: i === 0 ? host.photoUrl : undefined,
+    instagram: i === 0 ? host.instagram : undefined,
     team: teams ? (i % 2 === 0 ? "A" : "B") : undefined,
   }));
   const room: Room = {
     id: nanoid(10),
     code: code(),
     hostId: host.id,
-    config: { ...config, fillBots: config.fillBots !== false },
+    config: {
+      game,
+      seats: seatsCount,
+      fillBots: config.fillBots !== false,
+      mendiHandsToWin: config.mendiHandsToWin,
+      callBreakRounds: config.callBreakRounds,
+      trumpMode: config.trumpMode,
+    },
     phase: "lobby",
     seats,
     chat: [],
@@ -90,9 +121,7 @@ export function getRoomByCode(c: string) {
 }
 
 export function roomsForLobby() {
-  return [...rooms.values()]
-    .filter((r) => r.phase !== "finished")
-    .map((r) => ({
+  return [...rooms.values()].map((r) => ({
       id: r.id,
       code: r.code,
       game: r.config.game,
@@ -116,13 +145,17 @@ export function joinRoom(room: Room, user: UserPublic): number {
   if (existing) {
     existing.connected = true;
     existing.name = user.displayName;
+    existing.photoUrl = user.photoUrl;
+    existing.instagram = user.instagram;
     return existing.index;
   }
-  if (room.phase !== "lobby") throw new Error("This table is already in play.");
+  if (room.phase === "playing") throw new Error("This table is already in play.");
   const empty = room.seats.find((s) => !s.playerId);
   if (!empty) throw new Error("Table is full.");
   empty.playerId = user.id;
   empty.name = user.displayName;
+  empty.photoUrl = user.photoUrl;
+  empty.instagram = user.instagram;
   empty.isBot = false;
   empty.ready = false;
   empty.connected = true;
@@ -138,6 +171,8 @@ export function leaveRoom(room: Room, userId: string) {
   }
   seat.playerId = null;
   seat.name = "Empty";
+  seat.photoUrl = undefined;
+  seat.instagram = undefined;
   seat.ready = false;
   seat.connected = false;
   if (room.hostId === userId) {
@@ -149,6 +184,66 @@ export function leaveRoom(room: Room, userId: string) {
 export function setReady(room: Room, userId: string, ready: boolean) {
   const seat = room.seats.find((s) => s.playerId === userId);
   if (seat) seat.ready = ready;
+}
+
+export function clearBots(room: Room) {
+  for (const seat of room.seats) {
+    if (!seat.isBot) continue;
+    seat.playerId = null;
+    seat.name = "Empty";
+    seat.isBot = false;
+    seat.ready = false;
+    seat.connected = false;
+    seat.photoUrl = undefined;
+    seat.instagram = undefined;
+  }
+}
+
+export function configureTable(room: Room, patch: Partial<RoomConfig>) {
+  if (room.phase === "playing") throw new Error("Wait until this sitting ends.");
+  if (patch.seats != null) resizeSeats(room, Number(patch.seats));
+  if (patch.game !== undefined) {
+    const game = patch.game;
+    if (game) {
+      const options = GAME_META[game].seatOptions;
+      if (!options.includes(room.seats.length)) {
+        const humans = room.seats.filter((s) => s.playerId && !s.isBot).length;
+        const fit = options.find((n) => n >= humans);
+        if (fit == null) throw new Error(`Too many people sitting for ${GAME_META[game].title}.`);
+        resizeSeats(room, fit);
+      }
+    }
+    room.config.game = game;
+  }
+  if (patch.fillBots !== undefined) room.config.fillBots = Boolean(patch.fillBots);
+  if (patch.trumpMode !== undefined) room.config.trumpMode = patch.trumpMode;
+  if (patch.callBreakRounds !== undefined) room.config.callBreakRounds = patch.callBreakRounds;
+  if (patch.mendiHandsToWin !== undefined) room.config.mendiHandsToWin = patch.mendiHandsToWin;
+  paintTeams(room);
+}
+
+export function resizeSeats(room: Room, n: number) {
+  if (room.phase === "playing") throw new Error("Wait until this sitting ends.");
+  if (n < 2 || n > 8) throw new Error("A table seats 2–8.");
+  const humans = room.seats.filter((s) => s.playerId && !s.isBot);
+  if (n < humans.length) throw new Error(`Need at least ${humans.length} chairs for who's sitting.`);
+  const next: Seat[] = Array.from({ length: n }, (_, i) => {
+    const h = humans[i];
+    if (h) return { ...h, index: i };
+    return emptySeat(i);
+  });
+  room.seats = next;
+  room.config.seats = n;
+  paintTeams(room);
+}
+
+export function returnToLobby(room: Room) {
+  room.phase = "lobby";
+  room.game = null;
+  clearBots(room);
+  for (const seat of room.seats) {
+    if (seat.playerId && !seat.isBot) seat.ready = false;
+  }
 }
 
 export function fillBots(room: Room) {
@@ -173,6 +268,11 @@ export function canStart(room: Room) {
 }
 
 export function startGame(room: Room) {
+  if (!room.config.game) throw new Error("Pick a game before you deal.");
+  if (!GAME_META[room.config.game].seatOptions.includes(room.seats.length)) {
+    throw new Error(`${GAME_META[room.config.game].title} wants ${GAME_META[room.config.game].seatOptions.join(" or ")} chairs.`);
+  }
+  paintTeams(room);
   if (!canStart(room)) throw new Error("Everyone must be ready, and empty seats need computers or players.");
   const n = room.seats.length;
   if (room.config.game === "bluff") room.game = createBluff(n);
@@ -203,7 +303,16 @@ export function publicRoom(room: Room, userId: string | null): RoomPublic {
     hostId: room.hostId,
     config: room.config,
     phase: room.phase,
-    seats: room.seats.map((s) => ({ ...s })),
+    seats: room.seats.map((s) => {
+      if (!s.playerId || s.isBot) return { ...s };
+      const live = getUser(s.playerId);
+      return {
+        ...s,
+        name: live?.displayName ?? s.name,
+        photoUrl: live?.photoUrl,
+        instagram: live?.instagram,
+      };
+    }),
     chat,
     game: room.game && room.phase !== "lobby" ? hideGame(room.game, youSeat) : null,
     youSeat,
@@ -289,6 +398,10 @@ export function trackSocket(userId: string, socketId: string) {
 
 export function untrackSocket(userId: string, socketId: string) {
   socketsByUser.get(userId)?.delete(socketId);
+}
+
+export function isOnline(userId: string) {
+  return (socketsByUser.get(userId)?.size ?? 0) > 0;
 }
 
 export { teamOf };

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { GAME_META, type RoomPublic } from "@shared/types.ts";
+import { GAME_META, type GameId, type RoomPublic, type TrumpMode } from "@shared/types.ts";
 import { ChatPanel } from "../components/ChatPanel.tsx";
+import { BrandMark } from "../components/BrandMark.tsx";
+import { InviteInbox } from "../components/InviteInbox.tsx";
 import { RulesRail } from "../components/RulesRail.tsx";
 import { connect, emit, loadSession } from "../session.ts";
 
@@ -38,47 +40,130 @@ export function RoomLobby() {
   }
   if (!room) return <div className="room-hero">Finding the table…</div>;
 
-  const meta = GAME_META[room.config.game];
+  const game = room.config.game;
+  const meta = game ? GAME_META[game] : null;
   const you = room.seats.find((s) => s.playerId === session.user.id);
   const host = room.hostId === session.user.id;
+  const seatChoices = meta ? meta.seatOptions : [2, 3, 4, 5, 6, 7, 8];
+
+  async function configure(patch: Record<string, unknown>) {
+    if (!room) return;
+    const res = await emit<{ ok: boolean; error?: string }>("room:configure", { roomId: room.id, ...patch });
+    if (!res.ok) setErr(res.error ?? "Could not set the table");
+  }
 
   return (
     <>
       <header className="topbar">
         <Link className="mark" to="/lobby">
-          <span className="ring">♠</span>
-          <div>
-            <strong>Baithak</strong>
-            <span>
-              {meta.title} · {room.code}
-            </span>
-          </div>
+          <BrandMark kicker={`${meta?.title ?? "Open table"} · ${room.code}`} />
         </Link>
-        <button className="btn ghost" type="button" onClick={() => emit("room:leave", room.id).then(() => nav("/lobby"))}>
-          Leave
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link className="btn" to={`/people?table=${room.id}`}>
+            Invite
+          </Link>
+          <button className="btn ghost" type="button" onClick={() => emit("room:leave", room.id).then(() => nav("/lobby"))}>
+            Leave
+          </button>
+        </div>
       </header>
       <div className="lobby">
         <div className="room-hero" style={{ padding: 0 }}>
+          <InviteInbox />
           <div className="kicker">Room {room.code}</div>
           <h1 className="display" style={{ fontSize: 44 }}>
-            {meta.title}
+            {meta?.title ?? "The table is open"}
           </h1>
           <p style={{ color: "var(--mist)" }}>
-            {room.config.seats} chairs
-            {room.config.game === "callBreak" ? ` · ${room.config.callBreakRounds ?? 5} deals` : ""}
-            {room.config.trumpMode && room.config.game !== "bluff" && room.config.game !== "cabo"
-              ? ` · trump ${room.config.trumpMode}`
-              : ""}
-            . Share the code so friends can sit. Empty seats become computers when you deal.
+            {room.config.seats} chairs. Deal any of the four games from this sitting. After a hand, come back here and
+            pick another.
           </p>
+          {host ? (
+            <div className="create" style={{ marginBottom: 16 }}>
+              <div className="field">
+                <label>Tonight's game</label>
+                <select
+                  value={game ?? ""}
+                  onChange={(e) => configure({ game: (e.target.value || null) as GameId | null })}
+                >
+                  <option value="">Pick when you deal</option>
+                  {Object.entries(GAME_META).map(([id, g]) => (
+                    <option key={id} value={id}>
+                      {g.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Chairs</label>
+                <select value={room.config.seats} onChange={(e) => configure({ seats: Number(e.target.value) })}>
+                  {seatChoices.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {game === "callBreak" || game === "mendi" ? (
+                <div className="field">
+                  <label>Trump</label>
+                  <select
+                    value={room.config.trumpMode ?? "classic"}
+                    onChange={(e) => configure({ trumpMode: e.target.value as TrumpMode })}
+                  >
+                    <option value="classic">
+                      {game === "callBreak" ? "Classic — Spades always trump" : "Closed — tucked card"}
+                    </option>
+                    <option value="power">Power card</option>
+                    <option value="cut">Cut</option>
+                  </select>
+                </div>
+              ) : null}
+              {game === "callBreak" ? (
+                <div className="field">
+                  <label>Deals</label>
+                  <select
+                    value={room.config.callBreakRounds ?? 5}
+                    onChange={(e) => configure({ callBreakRounds: Number(e.target.value) as 3 | 5 })}
+                  >
+                    <option value={3}>3 rounds</option>
+                    <option value={5}>5 rounds</option>
+                  </select>
+                </div>
+              ) : null}
+              <label style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--mist)", fontSize: 14 }}>
+                <input
+                  type="checkbox"
+                  checked={room.config.fillBots}
+                  onChange={(e) => configure({ fillBots: e.target.checked })}
+                />
+                Fill empty chairs with computers
+              </label>
+            </div>
+          ) : (
+            <p style={{ color: "var(--mist)" }}>
+              {game ? `${meta?.title} is queued.` : "The host will pick a game before dealing."}
+            </p>
+          )}
           <div className="wait-grid">
             {room.seats.map((s) => (
               <div className="seat-card" key={s.index}>
-                <div className="mono" style={{ fontSize: 11, color: "var(--mist)" }}>
-                  {s.team ? `Team ${s.team}` : `Seat ${s.index + 1}`}
+                <div className="seat-card-who">
+                  <span className="mini-portrait">
+                    {s.photoUrl ? <img src={s.photoUrl} alt="" /> : (s.name || "?").slice(0, 1)}
+                  </span>
+                  <div>
+                    <div className="mono" style={{ fontSize: 11, color: "var(--mist)" }}>
+                      {s.team ? `Team ${s.team}` : `Seat ${s.index + 1}`}
+                    </div>
+                    <div className="nm">{s.name}</div>
+                    {s.instagram ? (
+                      <div className="mono" style={{ fontSize: 11, color: "var(--mist)" }}>
+                        @{s.instagram}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="nm">{s.name}</div>
                 <div style={{ color: s.ready ? "var(--brass-2)" : "var(--mist)", fontSize: 12 }}>
                   {s.playerId ? (s.ready ? "Ready" : "Settling in") : "Waiting"}
                 </div>
@@ -118,10 +203,10 @@ export function RoomLobby() {
         <div style={{ display: "grid", gap: 16 }}>
           <ChatPanel
             messages={room.chat}
-            teamEnabled={meta.teams}
+            teamEnabled={Boolean(meta?.teams)}
             onSend={(text, team) => connect(session.token).emit("room:chat", { roomId: room.id, text, team })}
           />
-          <RulesRail game={room.config.game} />
+          {game ? <RulesRail game={game} /> : null}
         </div>
       </div>
     </>

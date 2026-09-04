@@ -1,34 +1,54 @@
+import "./env.ts";
 import express from "express";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import type { ClientAction, GameId, RoomConfig, TrumpMode, UserPublic } from "../shared/types.ts";
-import { GAME_META } from "../shared/types.ts";
-import { issueToken, login, register, userFromToken } from "./auth.ts";
+import { completeSignup, completePasswordReset, getMe, getUser, issueSession, listPeople, login, refreshSession, requestPasswordReset, resendPasswordReset, revokeToken, savePhoto, updateProfile, userFromToken, verifyPasswordReset } from "./auth.ts";
+import {
+  adminFromToken,
+  adminLogin,
+  adminLogout,
+  approveRequest,
+  issueSignupOtp,
+  listRequests,
+  rejectRequest,
+  requestAccess,
+  verifySignupOtp,
+} from "./access.ts";
+import { notifyInvite, notifySeatTaken, notifyTableDealt, notifyTurnIfAway } from "./notify.ts";
+import { createInvite, dismissInvite, invitesFor } from "./invites.ts";
+import { dropSubscription, pushConfigured, sendWebPush, upsertSubscription, vapidPublicKey } from "./push.ts";
+import { photosDir } from "./store.ts";
 import { botAction } from "./engine/bots.ts";
 import { resolveBluffTimeout } from "./engine/bluff.ts";
 import {
   apply,
+  configureTable,
   createRoom,
   currentActor,
   fillBots,
   getLobbyChat,
   getRoom,
   getRoomByCode,
+  isOnline,
   joinRoom,
   leaveRoom,
   publicRoom,
   pushLobby,
+  returnToLobby,
   roomChat,
   roomsForLobby,
   setReady,
   startGame,
+  trackSocket,
+  untrackSocket,
   type Room,
 } from "./rooms.ts";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -43,14 +63,76 @@ function authUser(token: unknown): UserPublic {
   return user;
 }
 
-app.post("/api/register", (req, res) => {
+function bearer(req: { headers: { authorization?: string } }) {
+  const h = req.headers.authorization ?? "";
+  return h.startsWith("Bearer ") ? h.slice(7) : undefined;
+}
+
+function requireUser(req: { headers: { authorization?: string } }, res: express.Response) {
+  const user = userFromToken(bearer(req));
+  if (!user) {
+    res.status(401).json({ error: "Sign in first." });
+    return null;
+  }
+  return user;
+}
+
+app.post("/api/register", (_req, res) => {
+  res.status(403).json({ error: "Access is by invitation. Request a chair first." });
+});
+
+app.post("/api/access/request", (req, res) => {
   try {
-    const { username, password, displayName } = req.body ?? {};
-    const user = register(String(username ?? ""), String(password ?? ""), String(displayName ?? ""));
-    const token = issueToken(user.id);
-    res.json({ user, token });
+    const { name, email, reason } = req.body ?? {};
+    requestAccess(String(name ?? ""), String(email ?? ""), String(reason ?? ""));
+    res.json({ ok: true, detail: "Request submitted. We'll write if a chair opens." });
   } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : "Could not register." });
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not submit." });
+  }
+});
+
+app.post("/api/signup/request-otp", async (req, res) => {
+  try {
+    const email = String(req.body?.email ?? "");
+    const result = await issueSignupOtp(email, false);
+    res.json({ ok: true, detail: "Verification code sent.", expires_in: result.expiresIn, otp: result.echo });
+  } catch (e) {
+    const retry = e && typeof e === "object" && "retryAfter" in e ? Number((e as { retryAfter: number }).retryAfter) : undefined;
+    res.status(retry ? 429 : 400).json({ error: e instanceof Error ? e.message : "Could not send code.", retry_after: retry });
+  }
+});
+
+app.post("/api/signup/resend-otp", async (req, res) => {
+  try {
+    const email = String(req.body?.email ?? "");
+    const result = await issueSignupOtp(email, true);
+    res.json({ ok: true, detail: "A new verification code was sent.", expires_in: result.expiresIn, otp: result.echo });
+  } catch (e) {
+    const retry = e && typeof e === "object" && "retryAfter" in e ? Number((e as { retryAfter: number }).retryAfter) : undefined;
+    res.status(retry ? 429 : 400).json({ error: e instanceof Error ? e.message : "Could not resend code.", retry_after: retry });
+  }
+});
+
+app.post("/api/signup/verify-otp", (req, res) => {
+  try {
+    const setup_token = verifySignupOtp(String(req.body?.email ?? ""), String(req.body?.otp ?? ""));
+    res.json({ ok: true, setup_token, detail: "Email verified. Set your chair." });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not verify." });
+  }
+});
+
+app.post("/api/signup/complete", (req, res) => {
+  try {
+    const user = completeSignup(
+      String(req.body?.setup_token ?? ""),
+      String(req.body?.username ?? ""),
+      String(req.body?.password ?? ""),
+      String(req.body?.displayName ?? "")
+    );
+    res.json(issueSession(user.id));
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not finish signup." });
   }
 });
 
@@ -58,21 +140,278 @@ app.post("/api/login", (req, res) => {
   try {
     const { username, password } = req.body ?? {};
     const user = login(String(username ?? ""), String(password ?? ""));
-    const token = issueToken(user.id);
-    res.json({ user, token });
+    res.json(issueSession(user.id));
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : "Could not sign in." });
   }
 });
 
-app.get("/api/meta", (_req, res) => {
-  res.json({ games: GAME_META });
+app.post("/api/auth/refresh", (req, res) => {
+  try {
+    res.json(refreshSession(String(req.body?.refresh_token ?? "")));
+  } catch (e) {
+    res.status(401).json({ error: e instanceof Error ? e.message : "Session expired. Sign in again." });
+  }
+});
+
+app.post("/api/password/request-otp", async (req, res) => {
+  try {
+    const loginId = String(req.body?.email ?? req.body?.username ?? req.body?.login ?? "");
+    const result = await requestPasswordReset(loginId);
+    res.json({
+      ok: true,
+      detail: "If that chair exists, we sent a code.",
+      expires_in: result.expiresIn,
+      otp: result.echo,
+    });
+  } catch (e) {
+    const retry = e && typeof e === "object" && "retryAfter" in e ? Number((e as { retryAfter: number }).retryAfter) : undefined;
+    res.status(retry ? 429 : 400).json({ error: e instanceof Error ? e.message : "Could not send code.", retry_after: retry });
+  }
+});
+
+app.post("/api/password/resend-otp", async (req, res) => {
+  try {
+    const loginId = String(req.body?.email ?? req.body?.username ?? req.body?.login ?? "");
+    const result = await resendPasswordReset(loginId);
+    res.json({
+      ok: true,
+      detail: "If that chair exists, we sent a new code.",
+      expires_in: result.expiresIn,
+      otp: result.echo,
+    });
+  } catch (e) {
+    const retry = e && typeof e === "object" && "retryAfter" in e ? Number((e as { retryAfter: number }).retryAfter) : undefined;
+    res.status(retry ? 429 : 400).json({ error: e instanceof Error ? e.message : "Could not resend code.", retry_after: retry });
+  }
+});
+
+app.post("/api/password/verify-otp", (req, res) => {
+  try {
+    const reset_token = verifyPasswordReset(
+      String(req.body?.email ?? req.body?.username ?? req.body?.login ?? ""),
+      String(req.body?.otp ?? "")
+    );
+    res.json({ ok: true, reset_token, detail: "Code verified. Choose a new password." });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not verify." });
+  }
+});
+
+app.post("/api/password/reset", (req, res) => {
+  try {
+    res.json(completePasswordReset(String(req.body?.reset_token ?? ""), String(req.body?.password ?? "")));
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not reset password." });
+  }
+});
+
+app.post("/api/logout", (req, res) => {
+  const token = bearer(req) ?? (typeof req.body?.token === "string" ? req.body.token : undefined);
+  const refresh = typeof req.body?.refresh_token === "string" ? req.body.refresh_token : undefined;
+  const user = userFromToken(token);
+  const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
+  if (user && endpoint) dropSubscription(user.id, endpoint);
+  revokeToken(token, refresh);
+  res.json({ ok: true });
+});
+
+app.get("/api/me", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  res.json({ user: getMe(user.id) });
+});
+
+app.post("/api/me", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const me = updateProfile(user.id, {
+      displayName: req.body?.displayName,
+      phone: req.body?.phone,
+      instagram: req.body?.instagram,
+    });
+    res.json({ user: me });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not save." });
+  }
+});
+
+app.post("/api/me/photo", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const me = savePhoto(user.id, String(req.body?.image ?? ""));
+    res.json({ user: me });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not save photo." });
+  }
+});
+
+app.get("/api/push/vapid", (_req, res) => {
+  const key = vapidPublicKey();
+  if (!key) return res.status(503).json({ error: "Push is not configured." });
+  res.json({ publicKey: key });
+});
+
+app.post("/api/push/subscribe", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    upsertSubscription(user.id, req.body ?? {});
+    res.json({ ok: true, detail: "Subscribed successfully." });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not subscribe." });
+  }
+});
+
+app.post("/api/push/unsubscribe", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  dropSubscription(user.id, String(req.body?.endpoint ?? ""));
+  res.json({ ok: true, detail: "Unsubscribed successfully." });
+});
+
+app.post("/api/push/test", async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  if (!pushConfigured()) return res.status(503).json({ error: "Push is not configured." });
+  await sendWebPush(user.id, "Baithak", "The parlor can reach this chair.", "/lobby");
+  res.json({ ok: true });
+});
+
+app.get("/api/people", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  res.json({
+    people: listPeople().map((p) => ({ ...p, online: isOnline(p.id), self: p.id === user.id })),
+  });
+});
+
+app.get("/api/people/:id", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const person = getUser(req.params.id);
+  if (!person) {
+    res.status(404).json({ error: "No chair with that name." });
+    return;
+  }
+  res.json({ user: { ...person, online: isOnline(person.id), self: person.id === user.id } });
+});
+
+app.get("/api/invites", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  res.json({ invites: invitesFor(user.id) });
+});
+
+app.post("/api/invites/:id/dismiss", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  dismissInvite(req.params.id, user.id);
+  res.json({ ok: true });
+});
+
+app.post("/api/people/:id/ping", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const roomId = typeof req.body?.roomId === "string" ? req.body.roomId : "";
+    const room = roomId ? getRoom(roomId) : undefined;
+    const invite = createInvite("ping", user, req.params.id, room ? { id: room.id, code: room.code } : undefined);
+    notifyInvite(invite);
+    io.to(`user:${invite.toId}`).emit("invite:incoming", invite);
+    res.json({ ok: true, invite });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not ping." });
+  }
+});
+
+app.post("/api/rooms/:id/invite", (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const room = getRoom(req.params.id);
+  if (!room) return res.status(404).json({ error: "No such table." });
+  const seated = room.seats.some((s) => s.playerId === user.id);
+  if (!seated && room.hostId !== user.id) return res.status(403).json({ error: "Sit first, then invite." });
+  const ids = Array.isArray(req.body?.userIds) ? req.body.userIds.map(String) : [];
+  const sent = [];
+  try {
+    for (const id of ids) {
+      if (room.seats.some((s) => s.playerId === id)) continue;
+      const invite = createInvite("invite", user, id, { id: room.id, code: room.code });
+      notifyInvite(invite);
+      io.to(`user:${invite.toId}`).emit("invite:incoming", invite);
+      sent.push(invite);
+    }
+    res.json({ ok: true, sent: sent.length });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not invite." });
+  }
+});
+
+app.post("/api/admin/login", (req, res) => {
+  try {
+    const token = adminLogin(String(req.body?.username ?? ""), String(req.body?.password ?? ""));
+    res.json({ token });
+  } catch (e) {
+    res.status(401).json({ error: e instanceof Error ? e.message : "No." });
+  }
+});
+
+app.post("/api/admin/logout", (req, res) => {
+  const token = bearer(req);
+  if (token) adminLogout(token);
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/requests", (req, res) => {
+  if (!adminFromToken(bearer(req))) return res.status(401).json({ error: "Sign in at the door." });
+  const status = req.query.status;
+  const filter = status === "PENDING" || status === "APPROVED" || status === "REJECTED" ? status : undefined;
+  res.json({
+    requests: listRequests(filter).map((r) => ({
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      reason: r.reason,
+      status: r.status,
+      rejectionReason: r.rejectionReason,
+      signupCompleted: Boolean(r.userId),
+      createdAt: r.createdAt,
+    })),
+  });
+});
+
+app.post("/api/admin/requests/:id/approve", async (req, res) => {
+  if (!adminFromToken(bearer(req))) return res.status(401).json({ error: "Sign in at the door." });
+  try {
+    const rec = await approveRequest(req.params.id);
+    res.json({ ok: true, id: rec.id });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not approve." });
+  }
+});
+
+app.post("/api/admin/requests/:id/reject", (req, res) => {
+  if (!adminFromToken(bearer(req))) return res.status(401).json({ error: "Sign in at the door." });
+  try {
+    const rec = rejectRequest(req.params.id, String(req.body?.reason ?? ""));
+    res.json({ ok: true, id: rec.id });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Could not reject." });
+  }
+});
+
+app.get("/healthz", (_req, res) => {
+  res.json({ ok: true });
 });
 
 const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
+app.use("/photos", express.static(photosDir(), { maxAge: "7d" }));
 app.use(express.static(dist));
 app.get("*", (req, res, next) => {
-  if (req.path.startsWith("/api") || req.path.startsWith("/socket.io")) return next();
+  if (req.path.startsWith("/api") || req.path.startsWith("/socket.io") || req.path.startsWith("/photos")) return next();
   res.sendFile(join(dist, "index.html"), (err) => {
     if (err) next();
   });
@@ -83,6 +422,7 @@ function emitRoom(room: Room) {
     if (!seat.playerId || seat.isBot) continue;
     io.to(`user:${seat.playerId}`).emit("room:state", publicRoom(room, seat.playerId));
   }
+  notifyTurnIfAway(room);
 }
 
 function emitLobby() {
@@ -220,9 +560,10 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
   const user = socket.data.user as UserPublic;
+  trackSocket(user.id, socket.id);
   socket.join(`user:${user.id}`);
   socket.join("lobby");
-  socket.emit("hello", { user, tables: roomsForLobby(), lobbyChat: getLobbyChat() });
+  socket.emit("hello", { user, tables: roomsForLobby(), lobbyChat: getLobbyChat(), invites: invitesFor(user.id) });
 
   socket.on("lobby:chat", (text: string) => {
     if (typeof text !== "string" || !text.trim()) return;
@@ -249,6 +590,7 @@ io.on("connection", (socket) => {
       socket.join(`room:${room.id}`);
       emitRoom(room);
       emitLobby();
+      notifySeatTaken(room, user.displayName, room.hostId, user.id);
       cb?.({ ok: true, room: publicRoom(room, user.id) });
     } catch (e) {
       cb?.({ ok: false, error: e instanceof Error ? e.message : "Could not join." });
@@ -280,6 +622,34 @@ io.on("connection", (socket) => {
     emitLobby();
   });
 
+  socket.on("room:configure", (payload: { roomId: string } & Partial<RoomConfig>, cb?: (res: unknown) => void) => {
+    const room = getRoom(payload.roomId);
+    if (!room) return cb?.({ ok: false, error: "Table gone." });
+    if (room.hostId !== user.id) return cb?.({ ok: false, error: "Only the host can set the table." });
+    try {
+      configureTable(room, payload);
+      emitRoom(room);
+      emitLobby();
+      cb?.({ ok: true, room: publicRoom(room, user.id) });
+    } catch (e) {
+      cb?.({ ok: false, error: e instanceof Error ? e.message : "Could not set the table." });
+    }
+  });
+
+  socket.on("room:again", (roomId: string, cb?: (res: unknown) => void) => {
+    const room = getRoom(roomId);
+    if (!room) return cb?.({ ok: false, error: "Table gone." });
+    if (room.hostId !== user.id) return cb?.({ ok: false, error: "Only the host can deal the next sitting." });
+    if (room.phase === "playing" && room.game && room.game.phase !== "over") {
+      return cb?.({ ok: false, error: "This sitting is still going." });
+    }
+    clearTimers(room);
+    returnToLobby(room);
+    emitRoom(room);
+    emitLobby();
+    cb?.({ ok: true, room: publicRoom(room, user.id) });
+  });
+
   socket.on("room:start", (roomId: string, cb?: (res: unknown) => void) => {
     const room = getRoom(roomId);
     if (!room) return cb?.({ ok: false, error: "Table gone." });
@@ -289,6 +659,7 @@ io.on("connection", (socket) => {
       startGame(room);
       emitRoom(room);
       emitLobby();
+      notifyTableDealt(room);
       schedule(room);
       cb?.({ ok: true });
     } catch (e) {
@@ -341,6 +712,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
+    untrackSocket(user.id, socket.id);
     for (const room of roomsForLobby()) {
       const r = getRoom(room.id);
       if (!r) continue;

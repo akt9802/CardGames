@@ -82,17 +82,27 @@ async function cdp() {
     return res.result.result.value;
   }
 
-  await send("Page.navigate", { url: "http://localhost:5173/register" });
-  await sleep(800);
+  await send("Page.navigate", { url: "http://localhost:5173/request-access" });
+  await sleep(600);
+  await shot("request-access");
   await evalExpr(`
-    (() => {
-      const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      const inputs = [...document.querySelectorAll('input')];
-      const fire = (el, v) => { set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); };
-      fire(inputs[0], '${user}');
-      fire(inputs[1], '${user}');
-      fire(inputs[2], 'secret');
-      document.querySelector('button[type=submit]').click();
+    (async () => {
+      const email = '${user}@e2e.local';
+      const req = (path, body, token) => fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+      await req('/api/access/request', { name: '${user}', email, reason: 'ui shot needs a chair at the table' });
+      const admin = await req('/api/admin/login', { username: 'zakAddKK', password: '12qw!@QWzak765' });
+      const list = await fetch('/api/admin/requests?status=PENDING', { headers: { Authorization: 'Bearer ' + admin.token } }).then(r => r.json());
+      const rec = list.requests.find(r => r.email === email);
+      await req('/api/admin/requests/' + rec.id + '/approve', {}, admin.token);
+      const otpRes = await req('/api/signup/request-otp', { email });
+      const ver = await req('/api/signup/verify-otp', { email, otp: otpRes.otp });
+      const session = await req('/api/signup/complete', { setup_token: ver.setup_token, username: '${user}', password: 'secret', displayName: '${user}' });
+      localStorage.setItem('baithak-session', JSON.stringify(session));
+      location.href = '/lobby';
       return true;
     })()
   `);

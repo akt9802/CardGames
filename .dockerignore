@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.env
+.vite
+client/.vite
+*.log
+.tmp-*.png
+server/data/*.json
+scripts
+*.md
+.DS_Store

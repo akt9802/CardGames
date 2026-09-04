@@ -1,4 +1,5 @@
 import type { Seat } from "@shared/types.ts";
+import { Link } from "react-router-dom";
 
 export function ringStyle(index: number, count: number, youSeat: number, radius: number, youY?: number) {
   const rel = (index - youSeat + count) % count;
@@ -52,13 +53,24 @@ export function Seats({
             ].join(" ")}
             style={seatStyle(s.index, seats.length, youSeat)}
           >
-            <div className="bubble">{s.name.slice(0, 1)}</div>
+            <div className="bubble">
+              {s.photoUrl ? <img src={s.photoUrl} alt="" /> : s.name.slice(0, 1)}
+            </div>
             {isTurn ? <div className="turn-tag">{s.index === youSeat ? "your turn" : "turn"}</div> : null}
             <div className="nameplate">
               <div className="who">
-                {s.index === youSeat ? "You" : s.name}
-                {s.isBot ? " · cpu" : ""}
-              </div>
+              {s.index === youSeat
+                ? "You"
+                : s.playerId && !s.isBot
+                  ? (
+                    <Link className="quiet-link" to={`/people/${s.playerId}`}>
+                      {s.name}
+                    </Link>
+                  )
+                  : s.name}
+              {s.isBot ? " · cpu" : ""}
+            </div>
+              {s.instagram && s.index !== youSeat ? <div className="ig">@{s.instagram}</div> : null}
               <div className="meta">
                 {isTurn
                   ? turnLabel

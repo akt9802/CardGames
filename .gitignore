@@ -1,6 +1,12 @@
 node_modules
 dist
-server/data/users.json
+.env
+.vite
+client/.vite
+server/data/*.json
+!server/data/.gitkeep
+server/data/photos/*
+!server/data/photos/.gitkeep
 .DS_Store
 *.log
 .tmp-*.png
