@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { lockLandscape, unlockToPortrait } from "./orientation.ts";
 import { ensureSession } from "./session.ts";
 import { syncPushSubscription } from "./push.ts";
 import { AdminDoor } from "./pages/AdminDoor.tsx";
@@ -33,6 +34,19 @@ function Guard({ children }: { children: ReactNode }) {
   return ok ? children : <Navigate to="/login" replace />;
 }
 
+function TableOrientation() {
+  const loc = useLocation();
+  const play = loc.pathname.startsWith("/play/");
+  useEffect(() => {
+    if (play) void lockLandscape();
+    else void unlockToPortrait();
+    return () => {
+      void unlockToPortrait();
+    };
+  }, [play]);
+  return null;
+}
+
 function SwNav() {
   const nav = useNavigate();
   useEffect(() => {
@@ -53,6 +67,7 @@ export default function App() {
     <div className="app-bg">
       <div className="grain" />
       <SwNav />
+      <TableOrientation />
       <ParlorOnPhone />
       <Routes>
         <Route path="/" element={<Landing />} />

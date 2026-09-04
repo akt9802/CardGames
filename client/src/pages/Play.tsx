@@ -9,7 +9,9 @@ import { ChatPanel } from "../components/ChatPanel.tsx";
 import { PlayingCard } from "../components/PlayingCard.tsx";
 import { RulesRail } from "../components/RulesRail.tsx";
 import { Seats, trickStyle } from "../components/Seats.tsx";
+import { isPhone } from "../pwa.ts";
 import { connect, emit, loadSession } from "../session.ts";
+import { useMediaQuery } from "../useMediaQuery.ts";
 
 export function Play() {
   const { id } = useParams();
@@ -23,6 +25,16 @@ export function Play() {
   const [now, setNow] = useState(Date.now());
   const [chatOpen, setChatOpen] = useState(true);
   const [rulesOpen, setRulesOpen] = useState(true);
+  const compact = useMediaQuery("(max-width: 1100px), (max-height: 640px)");
+  const portrait = useMediaQuery("(orientation: portrait)");
+  const phone = isPhone();
+
+  useEffect(() => {
+    if (compact) {
+      setChatOpen(false);
+      setRulesOpen(false);
+    }
+  }, [compact]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -114,22 +126,74 @@ export function Play() {
   }
 
   return (
-    <div className={`play-shell ${chatOpen ? "" : "chat-collapsed"} ${rulesOpen ? "" : "rules-collapsed"}`}>
+    <div className={`play-shell ${compact ? "compact" : ""} ${chatOpen ? "" : "chat-collapsed"} ${rulesOpen ? "" : "rules-collapsed"}`}>
+      {phone && portrait ? (
+        <div className="rotate-gate" role="dialog" aria-live="polite">
+          <div>
+            <div className="kicker">The table</div>
+            <h2>Turn the phone on its side</h2>
+            <p>The felt is laid out landscape so seats, tricks, and your hand all fit. Rotate, then sit.</p>
+          </div>
+        </div>
+      ) : null}
       <header className="topbar">
         <Link className="mark" to="/lobby">
-          <BrandMark kicker={`${meta.title} · ${room.code}`} />
+          <BrandMark kicker={compact ? room.code : `${meta.title} · ${room.code}`} />
         </Link>
-        <div className="status">{statusLine(room)}</div>
-        <button className="btn ghost" type="button" onClick={() => navigator.clipboard.writeText(room.code)}>
-          Copy {room.code}
-        </button>
-        <button className="btn ghost" type="button" onClick={() => {
-          connect(session.token).emit("room:leave", room.id);
-          nav("/lobby");
-        }}>
-          Leave
-        </button>
+        {compact ? null : <div className="status">{statusLine(room)}</div>}
+        <div className="bar-actions">
+          {compact ? (
+            <>
+              <button
+                className={`btn ${chatOpen ? "solid" : ""}`}
+                type="button"
+                onClick={() => {
+                  setRulesOpen(false);
+                  setChatOpen((v) => !v);
+                }}
+              >
+                Chat
+              </button>
+              <button
+                className={`btn ${rulesOpen ? "solid" : ""}`}
+                type="button"
+                onClick={() => {
+                  setChatOpen(false);
+                  setRulesOpen((v) => !v);
+                }}
+              >
+                Rules
+              </button>
+            </>
+          ) : (
+            <button className="btn ghost" type="button" onClick={() => navigator.clipboard.writeText(room.code)}>
+              Copy {room.code}
+            </button>
+          )}
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => {
+              connect(session.token).emit("room:leave", room.id);
+              nav("/lobby");
+            }}
+          >
+            Leave
+          </button>
+        </div>
       </header>
+
+      {compact && (chatOpen || rulesOpen) ? (
+        <button
+          className="rail-scrim"
+          type="button"
+          aria-label="Close panel"
+          onClick={() => {
+            setChatOpen(false);
+            setRulesOpen(false);
+          }}
+        />
+      ) : null}
 
       <ChatPanel
         messages={room.chat}
