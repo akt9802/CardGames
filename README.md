@@ -357,7 +357,8 @@ docker compose --env-file .env logs -f --tail 100 baithak
 - Manifest: `client/public/manifest.webmanifest` (standalone, theme `#0e3b34`)
 - Icons: `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `logo.png`
 - Service worker: `client/public/sw.js` — cache static shell, never `/api` or `/socket.io` or `/photos`; push + `notificationclick` + `pushsubscriptionchange`
-- Add to Home Screen from the browser share menu (iOS). Push needs the profile **Enable** tap (user gesture).
+- **Phone install:** visiting on a phone opens a sheet to add Baithak to the home screen. Android Chrome uses the native install prompt; iPhone shows Share → Add to Home Screen. After dismiss, a brass **Add to home screen** pill stays until the parlor is opened as a standalone app. Hidden during play.
+- **Table chimes:** same Enable toggle as Whip — user-gesture only, on Profile and as a follow-up sheet after install / login. iPhone chimes only work from the home-screen icon. Login re-binds an existing subscription; logout unbinds the server row and keeps the browser permission.
 
 ---
 

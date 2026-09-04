@@ -4,10 +4,11 @@ import { BrandMark } from "../components/BrandMark.tsx";
 import {
   getExistingPushSubscription,
   isPushSupported,
+  requestAndSubscribeChimes,
   sendTestPush,
-  subscribeToPushNotifications,
   unsubscribeFromPushNotifications,
 } from "../push.ts";
+import { askShowInstall, isStandalone, needsHomeScreenForPush } from "../pwa.ts";
 import { apiJson, loadSession, logout, patchSession } from "../session.ts";
 import type { UserMe } from "@shared/types.ts";
 
@@ -96,13 +97,12 @@ export function Profile() {
         setPushOn(false);
         setOk("Chimes off.");
       } else {
-        const permission = await Notification.requestPermission();
-        setPushPermission(permission);
-        if (permission === "granted") {
-          await subscribeToPushNotifications();
+        const result = await requestAndSubscribeChimes();
+        setPushPermission(Notification.permission);
+        if (result === "on") {
           setPushOn(true);
           setOk("Chimes on. We'll tap you when the table needs you.");
-        } else if (permission === "denied") {
+        } else if (result === "denied") {
           setErr("Notifications are blocked. Allow them in the browser site settings.");
         }
       }
@@ -114,7 +114,9 @@ export function Profile() {
   }
 
   const photo = me?.photoUrl ?? session.user.photoUrl;
-  const standalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
+  const standalone = isStandalone();
+  const needHome = needsHomeScreenForPush();
+  const canEnable = isPushSupported() && !needHome;
 
   return (
     <>
@@ -210,6 +212,16 @@ export function Profile() {
               <p style={{ margin: 0, color: "var(--mist)", fontSize: 14 }}>
                 Tap when a table deals, someone sits, or it's your turn and you've stepped away.
               </p>
+              {needHome ? (
+                <p style={{ margin: "8px 0 0", color: "var(--brass-2)", fontSize: 13 }}>
+                  iPhone only rings from the home-screen parlor. Add Baithak first, open the icon, then Enable.
+                </p>
+              ) : null}
+              {!needHome && !isPushSupported() ? (
+                <p style={{ margin: "8px 0 0", color: "var(--brass-2)", fontSize: 13 }}>
+                  This browser does not take parlor chimes.
+                </p>
+              ) : null}
               {pushPermission === "denied" ? (
                 <p style={{ margin: "8px 0 0", color: "var(--brass-2)", fontSize: 13 }}>
                   Blocked by the browser. Check site settings.
@@ -219,7 +231,7 @@ export function Profile() {
             <button
               className={`btn ${pushOn ? "solid" : ""}`}
               type="button"
-              disabled={pushBusy || !isPushSupported()}
+              disabled={pushBusy || !canEnable}
               onClick={togglePush}
             >
               {pushBusy ? "…" : pushOn ? "On" : "Enable"}
@@ -243,9 +255,9 @@ export function Profile() {
           ) : null}
 
           {!standalone ? (
-            <p style={{ color: "var(--mist)", fontSize: 13 }}>
-              Add Baithak to the home screen from the browser share menu for the full parlor.
-            </p>
+            <button className="btn" type="button" onClick={() => askShowInstall()}>
+              Add to home screen
+            </button>
           ) : null}
 
           <div className="err">{err}</div>

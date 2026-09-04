@@ -14,6 +14,7 @@ import { Profile } from "./pages/Profile.tsx";
 import { RequestAccess } from "./pages/RequestAccess.tsx";
 import { RoomLobby } from "./pages/RoomLobby.tsx";
 import { Signup } from "./pages/Signup.tsx";
+import { ParlorOnPhone } from "./components/ParlorOnPhone.tsx";
 
 function Guard({ children }: { children: ReactNode }) {
   const [ok, setOk] = useState<boolean | null>(null);
@@ -52,6 +53,7 @@ export default function App() {
     <div className="app-bg">
       <div className="grain" />
       <SwNav />
+      <ParlorOnPhone />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<AuthPage />} />

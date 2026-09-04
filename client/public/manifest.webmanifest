@@ -9,6 +9,7 @@
   "orientation": "any",
   "background_color": "#071014",
   "theme_color": "#0e3b34",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon-192.png",

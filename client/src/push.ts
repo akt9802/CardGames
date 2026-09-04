@@ -77,6 +77,16 @@ export async function unsubscribeFromPushNotifications() {
   }
 }
 
+export async function requestAndSubscribeChimes(): Promise<"on" | "denied" | "default"> {
+  if (!isPushSupported()) throw new Error("This browser does not take parlor chimes.");
+  const permission = await Notification.requestPermission();
+  if (permission === "granted") {
+    await subscribeToPushNotifications();
+    return "on";
+  }
+  return permission === "denied" ? "denied" : "default";
+}
+
 export async function sendTestPush() {
   const token = await authToken();
   if (!token) throw new Error("Sign in first.");
